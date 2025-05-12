@@ -1,0 +1,1547 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Policy Hunt</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="game"></div>
+    
+    <div id="ui">
+        <div id="health-bar"></div>
+    </div>
+    
+    <div id="crosshair">+</div>
+    
+    <div id="wave-info">Wave: 1</div>
+    
+    <div id="start-screen">
+        <h1>Policy Hunt</h1>
+        <button id="start-button">Start Game</button>
+        <p>Controls: Arrow Keys to move, Mouse to look, Click on enemy to shoot</p>
+    </div>
+    
+    <div id="game-over-screen">
+        <h1>Game Over</h1>
+        <h2 id="final-score">You survived 0 waves</h2>
+        <button id="restart-button">Play Again</button>
+    </div>
+
+    <!-- Add audio elements -->
+    <audio id="gunshot-sound" preload="auto">
+        <source src="./public/gunshot.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="background-music" loop preload="auto">
+        <source src="./public/background.mp3" type="audio/mpeg">
+    </audio>
+
+    <div id="game-controls">
+        <button id="music-mute-button" class="game-control-button music-mute">
+            <span class="icon">🎵</span>
+            <span class="text">Music On</span>
+        </button>
+        <button id="sound-mute-button" class="game-control-button sound-mute">
+            <span class="icon">🔊</span>
+            <span class="text">Sound On</span>
+        </button>
+        <button id="exit-game-button" class="game-control-button exit">
+            <span class="icon">🚪</span>
+            <span class="text">Exit</span>
+        </button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const state = {
+            health: 100,
+            maxHealth: 100,
+            wave: 1,
+            maxWaves: 3, 
+            enemies: [],
+            powerUps: [],
+            gameStarted: false,
+            gameOver: false,
+            policyNumber: 'CHUBB' + Math.floor(Math.random() * 1000000000).toString().padStart(9, '0') 
+        };
+        const gameContainer = document.getElementById('game');
+        const healthBar = document.getElementById('health-bar');
+        const ammoDisplay = document.getElementById('ammo-display');
+        const waveInfo = document.getElementById('wave-info');
+        const startScreen = document.getElementById('start-screen');
+        const startButton = document.getElementById('start-button');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const restartButton = document.getElementById('restart-button');
+        const finalScore = document.getElementById('final-score');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.domElement.id = 'game-canvas'; // Add ID to the canvas
+        gameContainer.appendChild(renderer.domElement);
+
+   
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.5); 
+        scene.add(ambientLight);
+
+        const emergencyLight = new THREE.PointLight(0xff0000, 1, 50);
+        emergencyLight.position.set(0, 10, 0);
+        scene.add(emergencyLight);
+
+        // Computer screen light (blue)
+        const computerLight = new THREE.PointLight(0x0088ff, 0.8, 10);
+        computerLight.position.set(5, 3, -5);
+        scene.add(computerLight);
+
+        // Moonlight from window (blue-ish)
+        const moonLight = new THREE.DirectionalLight(0x8888ff, 0.3);
+        moonLight.position.set(20, 10, 20);
+        scene.add(moonLight);
+
+        // Office environment setup
+        function createOffice() {
+            // Floor
+            const floorGeometry = new THREE.PlaneGeometry(50, 50);
+            const floorMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x444444, 
+                roughness: 0.8 
+            });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            // Walls
+            createWall(0, 5, -25, 50, 10, 1); // Back wall
+            createWall(0, 5, 25, 50, 10, 1);  // Front wall
+            createWall(-25, 5, 0, 1, 10, 50); // Left wall
+            createWall(25, 5, 0, 1, 10, 50);  // Right wall
+
+            // Create office furniture
+            createDesk(5, 0, -10);
+            createDesk(-8, 0, -5);
+            createDesk(12, 0, 5);
+            createCubicle(0, 0, 15);
+            createCubicle(-15, 0, 0);
+            createCubicle(-15, 0, 10);
+            createCopier(18, 0, -18);
+            createVendingMachine(-22, 0, -22);
+            
+            // Add some computers as interactive elements
+            createComputer(5, 2.5, -10);
+            createComputer(-8, 2.5, -5);
+            createComputer(12, 2.5, 5);
+        }
+
+        function createWall(x, y, z, width, height, depth) {
+            const wallGeometry = new THREE.BoxGeometry(width, height, depth);
+            const wallMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x888888,
+                roughness: 0.7
+            });
+            const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+            wall.position.set(x, y, z);
+            wall.castShadow = true;
+            wall.receiveShadow = true;
+            scene.add(wall);
+            return wall;
+        }
+
+        function createDesk(x, y, z) {
+            const deskGeometry = new THREE.BoxGeometry(5, 2, 3);
+            const deskMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x8B4513,
+                roughness: 0.5
+            });
+            const desk = new THREE.Mesh(deskGeometry, deskMaterial);
+            desk.position.set(x, y + 1, z);
+            desk.castShadow = true;
+            desk.receiveShadow = true;
+            scene.add(desk);
+            
+            // Add desk to collidable objects
+            collidableObjects.push(desk);
+            
+            return desk;
+        }
+
+        function createCubicle(x, y, z) {
+            // Cubicle walls
+            const wall1 = createWall(x, y + 2, z, 0.5, 4, 5);
+            const wall2 = createWall(x + 2.5, y + 2, z - 2.5, 5, 4, 0.5);
+            
+            // Desk inside cubicle
+            createDesk(x + 2.5, y, z);
+            
+            collidableObjects.push(wall1, wall2);
+        }
+
+        function createCopier(x, y, z) {
+            const copierGeometry = new THREE.BoxGeometry(3, 4, 2);
+            const copierMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x333333,
+                roughness: 0.2
+            });
+            const copier = new THREE.Mesh(copierGeometry, copierMaterial);
+            copier.position.set(x, y + 2, z);
+            copier.castShadow = true;
+            copier.receiveShadow = true;
+            scene.add(copier);
+            
+            collidableObjects.push(copier);
+            
+            return copier;
+        }
+
+        function createVendingMachine(x, y, z) {
+            const machineGeometry = new THREE.BoxGeometry(3, 6, 2);
+            const machineMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x0000aa,
+                roughness: 0.3
+            });
+            const machine = new THREE.Mesh(machineGeometry, machineMaterial);
+            machine.position.set(x, y + 3, z);
+            machine.castShadow = true;
+            machine.receiveShadow = true;
+            scene.add(machine);
+            
+            collidableObjects.push(machine);
+            
+            // Add display panel
+            const displayGeometry = new THREE.PlaneGeometry(2, 3);
+            const displayMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x66aaff,
+                emissive: 0x66aaff,
+                emissiveIntensity: 0.5
+            });
+            const display = new THREE.Mesh(displayGeometry, displayMaterial);
+            display.position.set(0, 1, 1.01);
+            display.rotation.x = Math.PI;
+            machine.add(display);
+            
+            // Add a point light for the vending machine
+            const vendingLight = new THREE.PointLight(0x66aaff, 0.5, 5);
+            vendingLight.position.set(0, 1, 2);
+            machine.add(vendingLight);
+            return machine;
+        }
+        function createComputer(x, y, z) {
+            // Monitor
+            const monitorGeometry = new THREE.BoxGeometry(2, 1.5, 0.2);
+            const monitorMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x333333,
+                roughness: 0.2
+            });
+            const monitor = new THREE.Mesh(monitorGeometry, monitorMaterial);
+            monitor.position.set(x, y, z);
+            monitor.castShadow = true;
+            scene.add(monitor);
+            // Screen (emissive)
+            const screenGeometry = new THREE.PlaneGeometry(1.8, 1.3);
+            const screenMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x88ccff,
+                emissive: 0x88ccff,
+                emissiveIntensity: 0.8
+            });
+            const screen = new THREE.Mesh(screenGeometry, screenMaterial);
+            screen.position.set(0, 0, 0.11);
+            monitor.add(screen);
+            // Keyboard
+            const keyboardGeometry = new THREE.BoxGeometry(1.5, 0.1, 0.5);
+            const keyboardMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x111111,
+                roughness: 0.3
+            });
+            const keyboard = new THREE.Mesh(keyboardGeometry, keyboardMaterial);
+            keyboard.position.set(x, y - 0.7, z + 1);
+            keyboard.castShadow = true;
+            scene.add(keyboard);
+            
+            // Add a point light for the computer
+            const computerScreenLight = new THREE.PointLight(0x88ccff, 0.5, 3);
+            computerScreenLight.position.set(0, 0, 0.5);
+            monitor.add(computerScreenLight);
+            
+            // Add to interactive objects
+            interactiveObjects.push({
+                mesh: monitor,
+                type: 'computer',
+                interact: () => {
+                    // Give player ammo or health when interacting
+                    // All computer interactions now give health since ammo was removed
+                state.health = Math.min(state.maxHealth, state.health + 20);
+                updateUI();
+                showMessage("Found health pack! +20");
+                }
+            });
+            
+            return monitor;
+        }
+
+        // First person controls
+        let moveForward = false;
+        let moveBackward = false;
+        let moveLeft = false;
+        let moveRight = false;
+        let canJump = false;
+        
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+        
+        camera.position.y = 3; // Eye height
+        
+        // Collision detection
+        const collidableObjects = [];
+        const interactiveObjects = [];
+        
+        // Player weapon
+        const raycaster = new THREE.Raycaster();
+        let lastShot = 0;
+        const shootingCooldown = 300; // milliseconds between shots
+        
+        // Enemy class
+        class Enemy {
+            constructor(type, position) {
+                this.type = type;
+                this.speed = type === 'fast' ? 0.03 : 0.015;
+                this.health = type === 'fast' ? 20 : 50;
+                this.damage = type === 'fast' ? 5 : 10;
+                this.attackCooldown = 1000;
+                this.lastAttack = 0;
+                this.contactDistance = 2; // Distance at which enemy contact triggers game over
+                this.isDead = false; // Add flag to track if enemy is dead
+                
+                // Create visual representation
+                if (type === 'fast') {
+                    this.mesh = this.createPaperAirplane();
+                } else {
+                    this.mesh = this.createPossessedCopier();
+                }
+                
+                this.mesh.position.copy(position);
+                scene.add(this.mesh);
+            }
+            
+            createPaperAirplane() {
+                const shape = new THREE.Group();
+                
+                // Paper airplane geometry
+                const airplaneGeometry = new THREE.ConeGeometry(0.5, 2, 4);
+                airplaneGeometry.rotateX(Math.PI / 2);
+                const airplaneMaterial = new THREE.MeshStandardMaterial({ 
+                    color: 0xffffff,
+                    roughness: 0.5
+                });
+                const airplane = new THREE.Mesh(airplaneGeometry, airplaneMaterial);
+                shape.add(airplane);
+                
+                // Add wings
+                const wingGeometry = new THREE.BoxGeometry(2, 0.05, 1);
+                const wingMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
+                const wings = new THREE.Mesh(wingGeometry, wingMaterial);
+                wings.position.y = 0.1;
+                shape.add(wings);
+                
+                // Add glowing eyes
+                const eyeGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+                const eyeMaterial = new THREE.MeshStandardMaterial({ 
+                    color: 0xff0000,
+                    emissive: 0xff0000,
+                    emissiveIntensity: 1
+                });
+                
+                const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+                leftEye.position.set(0.2, 0.3, -0.5);
+                shape.add(leftEye);
+                
+                const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+                rightEye.position.set(-0.2, 0.3, -0.5);
+                shape.add(rightEye);
+                
+                return shape;
+            }
+            
+            createPossessedCopier() {
+                const shape = new THREE.Group();
+                
+                // Copier body
+                const bodyGeometry = new THREE.BoxGeometry(2, 3, 1.5);
+                const bodyMaterial = new THREE.MeshStandardMaterial({ 
+                    color: 0x333333,
+                    roughness: 0.2
+                });
+                const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+                shape.add(body);
+                
+                // Paper tray
+                const trayGeometry = new THREE.BoxGeometry(1.5, 0.2, 1);
+                const trayMaterial = new THREE.MeshStandardMaterial({ color: 0x222222 });
+                const tray = new THREE.Mesh(trayGeometry, trayMaterial);
+                tray.position.set(0, -1.4, 0.5);
+                shape.add(tray);
+                
+                // Control panel
+                const panelGeometry = new THREE.BoxGeometry(1.5, 0.5, 0.2);
+                const panelMaterial = new THREE.MeshStandardMaterial({ color: 0x111111 });
+                const panel = new THREE.Mesh(panelGeometry, panelMaterial);
+                panel.position.set(0, 0.5, 0.8);
+                panel.rotation.x = -Math.PI / 4;
+                shape.add(panel);
+                
+                // Glowing eyes
+                const eyeGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+                const eyeMaterial = new THREE.MeshStandardMaterial({ 
+                    color: 0xff0000,
+                    emissive: 0xff0000,
+                    emissiveIntensity: 1
+                });
+                
+                const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+                leftEye.position.set(0.5, 1, 0.8);
+                shape.add(leftEye);
+                
+                const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+                rightEye.position.set(-0.5, 1, 0.8);
+                shape.add(rightEye);
+                
+                return shape;
+            }
+            
+            update(playerPosition) {
+                // Skip update if enemy is dead
+                if (this.isDead) return;
+
+                // Move towards player
+                const direction = new THREE.Vector3()
+                    .subVectors(playerPosition, this.mesh.position)
+                    .normalize();
+                
+                // Keep height constant
+                direction.y = 0;
+                
+                // Move enemy
+                this.mesh.position.add(direction.multiplyScalar(this.speed));
+                
+                // Rotate to face player
+                this.mesh.lookAt(new THREE.Vector3(playerPosition.x, this.mesh.position.y, playerPosition.z));
+                
+                // Check for contact with player
+                const distanceToPlayer = this.mesh.position.distanceTo(playerPosition);
+                
+                // Debug log for distance (only log occasionally to avoid console spam)
+                if (Math.random() < 0.01) { // 1% chance to log
+                    console.log(`Enemy distance to player: ${distanceToPlayer.toFixed(2)} units`);
+                }
+                
+                // If enemy is too close and we're not already in game over state
+                if (distanceToPlayer < this.contactDistance && !state.gameOver) {
+                    console.log('Enemy contact detected! Distance:', distanceToPlayer);
+                    
+                    // Stop all enemies
+                    state.enemies.forEach(enemy => {
+                        enemy.speed = 0;
+                        enemy.isDead = true; // Mark all enemies as dead
+                    });
+                    
+                    // Show game over screen with specific message
+                    gameOver('Enemy Contact! An enemy got too close to you!');
+                    return;
+                }
+                
+                // Attack if close enough
+                if (distanceToPlayer < 3 && Date.now() - this.lastAttack > this.attackCooldown) {
+                    this.attack();
+                    this.lastAttack = Date.now();
+                }
+            }
+            
+            takeDamage(amount) {
+                if (this.isDead) return false;
+                
+                this.health -= amount;
+                
+                // Flash red when hit
+                const originalMaterials = [];
+                this.mesh.traverse(child => {
+                    if (child.isMesh) {
+                        originalMaterials.push({
+                            mesh: child,
+                            material: child.material.clone()
+                        });
+                        child.material = new THREE.MeshStandardMaterial({ 
+                            color: 0xff0000,
+                            emissive: 0xff0000,
+                            emissiveIntensity: 0.5
+                        });
+                    }
+                });
+                
+                // Reset material after flash
+                setTimeout(() => {
+                    originalMaterials.forEach(item => {
+                        item.mesh.material = item.material;
+                    });
+                }, 100);
+                
+                if (this.health <= 0) {
+                    this.isDead = true;
+                    this.die();
+                    return true; // Enemy died
+                }
+                return false; // Enemy still alive
+            }
+            
+            attack() {
+                state.health -= this.damage;
+                updateUI();
+                
+                // Screen flash effect for damage
+                document.body.style.backgroundColor = 'rgba(255, 0, 0, 0.3)';
+                setTimeout(() => {
+                    document.body.style.backgroundColor = '';
+                }, 100);
+                
+                if (state.health <= 0) {
+                    gameOver();
+                }
+            }
+            
+            die() {
+                this.isDead = true;
+                
+                // Spawn a power-up with 30% chance
+                if (Math.random() < 0.3) {
+                    spawnPowerUp(this.mesh.position.clone());
+                }
+                
+                // Remove from scene
+                scene.remove(this.mesh);
+                
+                // Play death sound
+                playSoundEffect('enemy-death');
+            }
+        }
+        
+        // PowerUp class
+        class PowerUp {
+            constructor(type, position) {
+                this.type = type;
+                this.position = position;
+                
+                // Create visual
+                this.mesh = this.createVisual();
+                this.mesh.position.copy(position);
+                scene.add(this.mesh);
+            }
+            
+            createVisual() {
+                const group = new THREE.Group();
+                
+                let geometry, material;
+                
+                if (this.type === 'health') {
+                    // Health pack (red cross on white box)
+                    geometry = new THREE.BoxGeometry(1, 0.5, 1);
+                    material = new THREE.MeshStandardMaterial({ 
+                        color: 0xffffff,
+                        roughness: 0.3
+                    });
+                    const box = new THREE.Mesh(geometry, material);
+                    group.add(box);
+                    
+                    // Red cross
+                    const crossVGeometry = new THREE.BoxGeometry(0.2, 0.4, 1.1);
+                    const crossHGeometry = new THREE.BoxGeometry(0.6, 0.2, 1.1);
+                    const crossMaterial = new THREE.MeshStandardMaterial({ 
+                        color: 0xff0000,
+                        emissive: 0xff0000,
+                        emissiveIntensity: 0.5
+                    });
+                    
+                    const crossV = new THREE.Mesh(crossVGeometry, crossMaterial);
+                    crossV.position.y = 0.1;
+                    group.add(crossV);
+                    
+                    const crossH = new THREE.Mesh(crossHGeometry, crossMaterial);
+                    crossH.position.y = 0.1;
+                    group.add(crossH);
+                    
+                } else if (this.type === 'ammo') {
+                    // Power boost (green box) - was ammo but now gives health
+                    geometry = new THREE.BoxGeometry(0.7, 0.7, 1);
+                    material = new THREE.MeshStandardMaterial({ 
+                        color: 0x00ff00,
+                        emissive: 0x00ff00,
+                        emissiveIntensity: 0.3,
+                        roughness: 0.5
+                    });
+                    const box = new THREE.Mesh(geometry, material);
+                    group.add(box);
+                }
+                
+                // Add floating animation
+                this.animate(group);
+                
+                return group;
+            }
+            
+            animate(mesh) {
+                // Make power-up float and rotate
+                const startY = mesh.position.y;
+                let time = Math.random() * 2 * Math.PI; // Random start time for variety
+                
+                // Animation function
+                function animate() {
+                    time += 0.02;
+                    mesh.position.y = startY + Math.sin(time) * 0.3;
+                    mesh.rotation.y += 0.02;
+                    requestAnimationFrame(animate);
+                }
+                
+                animate();
+            }
+            
+            collect() {
+                if (this.type === 'health') {
+                    state.health = Math.min(state.maxHealth, state.health + 30);
+                    showMessage("Health +30");
+                } else if (this.type === 'ammo') {
+                    // Convert ammo powerups to health since we don't use ammo anymore
+                    state.health = Math.min(state.maxHealth, state.health + 20);
+                    showMessage("Health +20");
+                }
+                
+                // Update UI
+                updateUI();
+                
+                // Remove from scene
+                scene.remove(this.mesh);
+                
+                // Play collection sound
+                playSoundEffect('powerup');
+            }
+            
+            update(playerPosition) {
+                // Check if player is close enough to collect
+                const distanceToPlayer = this.mesh.position.distanceTo(playerPosition);
+                if (distanceToPlayer < 2) {
+                    this.collect();
+                    return true; // Power-up was collected
+                }
+                return false; // Power-up not collected
+            }
+        }
+        
+        // Sound effects (mock function - would need audio files)
+        function playSoundEffect(effect) {
+            console.log(`Playing sound effect: ${effect}`);
+            // In a full implementation, we would play actual sounds here
+        }
+        
+        // Spawn enemies based on current wave
+        function spawnEnemiesForWave() {
+            const numberOfEnemies = Math.min(2 + state.wave, 10); // Reduced number of enemies
+            const numberOfFastEnemies = Math.floor(numberOfEnemies * 0.6);
+            const numberOfSlowEnemies = numberOfEnemies - numberOfFastEnemies;
+            
+            // Spawn positions - around the edges of the room
+            for (let i = 0; i < numberOfFastEnemies; i++) {
+                const position = getRandomSpawnPosition();
+                const enemy = new Enemy('fast', position);
+                state.enemies.push(enemy);
+            }
+            
+            for (let i = 0; i < numberOfSlowEnemies; i++) {
+                const position = getRandomSpawnPosition();
+                const enemy = new Enemy('slow', position);
+                state.enemies.push(enemy);
+            }
+            
+            showMessage(`Wave ${state.wave} started! Enemies: ${numberOfEnemies}`);
+        }
+        
+        function getRandomSpawnPosition() {
+            // Spawn at the edges of the playable area
+            const edge = 20; // distance from center to edge
+            let x, z;
+            
+            // Randomly pick which edge to spawn on
+            const side = Math.floor(Math.random() * 4);
+            
+            switch(side) {
+                case 0: // North
+                    x = Math.random() * 2 * edge - edge;
+                    z = -edge;
+                    break;
+                case 1: // East
+                    x = edge;
+                    z = Math.random() * 2 * edge - edge;
+                    break;
+                case 2: // South
+                    x = Math.random() * 2 * edge - edge;
+                    z = edge;
+                    break;
+                case 3: // West
+                    x = -edge;
+                    z = Math.random() * 2 * edge - edge;
+                    break;
+            }
+            
+            return new THREE.Vector3(x, 1, z);
+        }
+        
+        function spawnPowerUp(position) {
+            // Adjust y position to be on the floor
+            position.y = 1;
+            
+            // 50% chance for health, 50% for ammo
+            const type = Math.random() > 0.5 ? 'health' : 'ammo';
+            
+            const powerUp = new PowerUp(type, position);
+            state.powerUps.push(powerUp);
+        }
+        
+        // Message display
+        function showMessage(message) {
+            const messageElement = document.createElement('div');
+            messageElement.style.position = 'absolute';
+            messageElement.style.top = '100px';
+            messageElement.style.left = '50%';
+            messageElement.style.transform = 'translateX(-50%)';
+            messageElement.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            messageElement.style.color = 'white';
+            messageElement.style.padding = '10px';
+            messageElement.style.borderRadius = '5px';
+            messageElement.style.zIndex = '100';
+            messageElement.textContent = message;
+            
+            document.body.appendChild(messageElement);
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+                document.body.removeChild(messageElement);
+            }, 3000);
+        }
+        
+        // Update UI elements with current game state
+        function updateUI() {
+            // Update health bar
+            const healthPercent = (state.health / state.maxHealth) * 100;
+            healthBar.style.width = `${healthPercent}%`;
+            
+            // Make health bar change color based on health percentage
+            if (healthPercent > 60) {
+                healthBar.style.backgroundColor = '#00ff00'; // Green
+            } else if (healthPercent > 30) {
+                healthBar.style.backgroundColor = '#ffff00'; // Yellow
+            } else {
+                healthBar.style.backgroundColor = '#ff0000'; // Red
+            }
+            
+            // Ammo display removed
+            
+            // Update wave information
+            waveInfo.textContent = `Wave: ${state.wave}`;
+        }
+        
+        // Initialize controls and event listeners
+        function initControls() {
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('mousedown', onMouseDown);
+            document.addEventListener('mouseup', onMouseUp);
+            
+            // Handle pointer lock changes
+            document.addEventListener('pointerlockchange', () => {
+                const crosshair = document.getElementById('crosshair');
+                if (document.pointerLockElement === renderer.domElement) {
+                    // Pointer is locked, game controls are active
+                    state.gameStarted = true;
+                    crosshair.style.display = 'block'; // Show crosshair during gameplay
+                } else {
+                    // Pointer is unlocked, game controls are inactive
+                    state.gameStarted = false;
+                    crosshair.style.display = 'none'; // Hide crosshair when not in gameplay
+                }
+            });
+
+            // Handle pointer lock errors
+            document.addEventListener('pointerlockerror', () => {
+                console.log('Pointer lock error');
+            });
+
+            // Add click handler for the game canvas
+            renderer.domElement.addEventListener('click', () => {
+                if (!document.pointerLockElement) {
+                    renderer.domElement.requestPointerLock();
+                }
+            });
+
+            // Update mouse move handler
+            document.addEventListener('mousemove', (event) => {
+                if (document.pointerLockElement === renderer.domElement && state.gameStarted && !state.gameOver) {
+                    const movementX = event.movementX || 0;
+                    const movementY = event.movementY || 0;
+                    
+                    // Rotate camera based on mouse movement
+                    camera.rotation.y -= movementX * 0.003;
+                    
+                    // Limit vertical rotation
+                    const verticalRotation = camera.rotation.x - movementY * 0.003;
+                    camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, verticalRotation));
+                    
+                    // Update camera
+                    camera.updateProjectionMatrix();
+                }
+            });
+        }
+        
+        function onKeyDown(event) {
+            if (!state.gameStarted || state.gameOver) return;
+            
+            switch (event.code) {
+                case 'KeyW':
+                case 'ArrowUp':
+                    moveForward = true;
+                    break;
+                case 'KeyS':
+                case 'ArrowDown':
+                    moveBackward = true;
+                    break;
+                case 'KeyA':
+                case 'ArrowLeft':
+                    moveLeft = true;
+                    break;
+                case 'KeyD':
+                case 'ArrowRight':
+                    moveRight = true;
+                    break;
+                case 'Space':
+                    if (canJump) {
+                        velocity.y = 10;
+                        canJump = false;
+                    }
+                    break;
+                case 'KeyE':
+                    // Interact with objects
+                    tryInteract();
+                    break;
+            }
+        }
+        
+        function onKeyUp(event) {
+            if (!state.gameStarted || state.gameOver) return;
+            
+            switch (event.code) {
+                case 'KeyW':
+                case 'ArrowUp':
+                    moveForward = false;
+                    break;
+                case 'KeyS':
+                case 'ArrowDown':
+                    moveBackward = false;
+                    break;
+                case 'KeyA':
+                case 'ArrowLeft':
+                    moveLeft = false;
+                    break;
+                case 'KeyD':
+                case 'ArrowRight':
+                    moveRight = false;
+                    break;
+            }
+        }
+        
+        function onMouseMove(event) {
+            if (!state.gameStarted || state.gameOver || !document.pointerLockElement) return;
+            
+            const movementX = event.movementX || 0;
+            const movementY = event.movementY || 0;
+            
+            // Rotate camera based on mouse movement - increased sensitivity for better response
+            camera.rotation.y -= movementX * 0.003;
+            
+            // Limit vertical rotation
+            const verticalRotation = camera.rotation.x - movementY * 0.003;
+            camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, verticalRotation));
+            
+            // Ensure the entire scene rotates with camera movement
+            camera.updateProjectionMatrix();
+        }
+        
+        function onMouseDown(event) {
+            if (!state.gameStarted || state.gameOver || !document.pointerLockElement) return;
+            
+            if (event.button === 0) { // Left mouse button
+                // We only shoot when actually clicking on an enemy
+                shootAtEnemy();
+            }
+        }
+        
+        function onMouseUp(event) {
+            // No longer needed as we're not maintaining a shooting state
+        }
+        
+        // Shooting mechanics
+        function createMuzzleFlash() {
+            // Create a temporary point light with red color
+            const flashLight = new THREE.PointLight(0xff0000, 5, 15);
+            flashLight.position.set(0, 0, -1).applyMatrix4(camera.matrixWorld);
+            scene.add(flashLight);
+            
+            // Create a muzzle flash sprite
+            const spriteMaterial = new THREE.SpriteMaterial({
+                color: 0xff0000,
+                transparent: true,
+                opacity: 0.8
+            });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.scale.set(1, 1, 1);
+            sprite.position.set(0, 0, -1).applyMatrix4(camera.matrixWorld);
+            scene.add(sprite);
+            
+            // Remove after a short time
+            setTimeout(() => {
+                scene.remove(flashLight);
+                scene.remove(sprite);
+            }, 100);
+        }
+
+        function createBulletTrail(hitPosition) {
+            // Create a beam-like effect using a cylinder
+            const startPoint = new THREE.Vector3(0, 0, -1).applyMatrix4(camera.matrixWorld);
+            const endPoint = hitPosition;
+            
+            // Calculate the direction and length of the beam
+            const direction = new THREE.Vector3().subVectors(endPoint, startPoint);
+            const length = direction.length();
+            direction.normalize();
+            
+            // Create a cylinder for the beam
+            const geometry = new THREE.CylinderGeometry(0.05, 0.05, length, 8);
+            const material = new THREE.MeshBasicMaterial({
+                color: 0xff0000,
+                transparent: true,
+                opacity: 0.8
+            });
+            
+            const beam = new THREE.Mesh(geometry, material);
+            
+            // Position and rotate the beam
+            const midPoint = new THREE.Vector3().addVectors(startPoint, endPoint).multiplyScalar(0.5);
+            beam.position.copy(midPoint);
+            
+            // Rotate the beam to point from start to end
+            beam.quaternion.setFromUnitVectors(
+                new THREE.Vector3(0, 1, 0),
+                direction
+            );
+            
+            scene.add(beam);
+            
+            // Add a point light at the hit position for impact effect
+            const impactLight = new THREE.PointLight(0xff0000, 2, 5);
+            impactLight.position.copy(hitPosition);
+            scene.add(impactLight);
+            
+            // Remove the beam and light after a short time
+            setTimeout(() => {
+                scene.remove(beam);
+                scene.remove(impactLight);
+            }, 100);
+        }
+
+        // Update the audio state management
+        const audioState = {
+            gunshotSound: document.getElementById('gunshot-sound'),
+            backgroundMusic: document.getElementById('background-music'),
+            isMusicMuted: false,
+            isSoundMuted: false
+        };
+
+        // Update the game controls
+        const gameControls = {
+            musicMuteButton: document.getElementById('music-mute-button'),
+            soundMuteButton: document.getElementById('sound-mute-button'),
+            exitButton: document.getElementById('exit-game-button'),
+            musicIcon: document.querySelector('#music-mute-button .icon'),
+            musicText: document.querySelector('#music-mute-button .text'),
+            soundIcon: document.querySelector('#sound-mute-button .icon'),
+            soundText: document.querySelector('#sound-mute-button .text')
+        };
+
+        // Function to toggle background music
+        function toggleMusic() {
+            audioState.isMusicMuted = !audioState.isMusicMuted;
+            if (audioState.isMusicMuted) {
+                audioState.backgroundMusic.pause();
+                gameControls.musicIcon.textContent = '🎵';
+                gameControls.musicText.textContent = 'Music Off';
+                gameControls.musicMuteButton.classList.add('muted');
+            } else {
+                audioState.backgroundMusic.play().catch(error => {
+                    console.log('Error playing background music:', error);
+                });
+                gameControls.musicIcon.textContent = '🎵';
+                gameControls.musicText.textContent = 'Music On';
+                gameControls.musicMuteButton.classList.remove('muted');
+            }
+        }
+
+        // Function to toggle sound effects
+        function toggleSound() {
+            audioState.isSoundMuted = !audioState.isSoundMuted;
+            if (audioState.isSoundMuted) {
+                gameControls.soundIcon.textContent = '🔇';
+                gameControls.soundText.textContent = 'Sound Off';
+                gameControls.soundMuteButton.classList.add('muted');
+            } else {
+                gameControls.soundIcon.textContent = '🔊';
+                gameControls.soundText.textContent = 'Sound On';
+                gameControls.soundMuteButton.classList.remove('muted');
+            }
+        }
+
+        // Update the playGunshotSound function
+        function playGunshotSound() {
+            if (audioState.isSoundMuted) return;
+            
+            // Reset the sound to start
+            audioState.gunshotSound.currentTime = 0;
+            
+            // Play the sound
+            audioState.gunshotSound.play().catch(error => {
+                console.log('Error playing gunshot sound:', error);
+            });
+        }
+
+        // Modify the shootAtEnemy function to include sound
+        function shootAtEnemy() {
+            if (Date.now() - lastShot < shootingCooldown) return;
+            
+            // Update last shot time
+            lastShot = Date.now();
+            
+            // Play gunshot sound
+            playGunshotSound();
+            
+            // Create muzzle flash effect
+            createMuzzleFlash();
+            
+            // Check for hits using raycaster
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            
+            // Check for enemy hits
+            const enemyHits = state.enemies.filter(enemy => {
+                // We need to check all meshes in the enemy's hierarchy
+                let hit = false;
+                enemy.mesh.traverse(child => {
+                    if (child.isMesh) {
+                        const meshIntersects = raycaster.intersectObject(child);
+                        if (meshIntersects.length > 0) {
+                            hit = true;
+                            // Create bullet trail to hit point
+                            createBulletTrail(meshIntersects[0].point);
+                        }
+                    }
+                });
+                return hit;
+            });
+            
+            if (enemyHits.length > 0) {
+                // Hit the closest enemy
+                const enemy = enemyHits[0];
+                
+                // Play shooting sound
+                playSoundEffect('shoot');
+                
+                const dead = enemy.takeDamage(10); // Deal 10 damage
+                
+                if (dead) {
+                    // Remove dead enemy from the array
+                    state.enemies = state.enemies.filter(e => e !== enemy);
+                    
+                    // Check if all enemies are defeated
+                    if (state.enemies.length === 0) {
+                        endWave();
+                    }
+                }
+            }
+        }
+        
+        function tryInteract() {
+            // Check for interactive objects within reach
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            
+            for (const obj of interactiveObjects) {
+                const intersects = raycaster.intersectObject(obj.mesh, true);
+                
+                if (intersects.length > 0 && intersects[0].distance < 3) {
+                    // Call the interaction function
+                    obj.interact();
+                    break;
+                }
+            }
+        }
+        
+        // End current wave and prepare for the next
+        function endWave() {
+            if (state.wave >= state.maxWaves) {
+                gameOver('Victory! You completed all waves!');
+                return;
+            }
+            
+            state.wave++;
+            showWaveCompletionPopup(state.wave - 1);
+        }
+        
+        // Game over state
+        function gameOver(reason) {
+            state.gameOver = true;
+            
+            if (document.pointerLockElement) {
+                document.exitPointerLock();
+            }
+            
+            gameOverScreen.style.display = 'flex';
+            
+            const isVictory = reason.includes('Victory');
+            
+            let message = '';
+            if (reason === 'Enemy Contact! An enemy got too close to you!') {
+                message = 'An enemy reached you!';
+            } else if (isVictory) {
+                message = 'Congratulations! You completed all waves!';
+            } else {
+                message = 'Game Over!';
+            }
+            
+            finalScore.innerHTML = `
+                <h2 style="color: ${isVictory ? '#00ff00' : '#ff0000'}">${message}</h2>
+                <p>You survived ${state.wave} waves!</p>
+                ${isVictory ? `<p>Final Policy Number: ${state.policyNumber}</p>` : ''}
+            `;
+            
+            const existingButtons = gameOverScreen.querySelectorAll('button');
+            existingButtons.forEach(button => button.remove());
+            
+            const buttonContainer = document.createElement('div');
+            buttonContainer.className = 'button-container';
+            
+            const retryButton = document.createElement('button');
+            retryButton.className = `retry-button ${isVictory ? 'victory' : ''}`;
+            retryButton.textContent = isVictory ? 'Play Again' : 'Try Again';
+            
+            const exitButton = document.createElement('button');
+            exitButton.className = 'exit-button';
+            exitButton.textContent = 'Exit Game';
+            
+            retryButton.addEventListener('click', () => {
+                // Reset game state
+                state.health = state.maxHealth;
+                state.wave = 1;
+                state.gameOver = false;
+                state.gameStarted = true;
+                state.policyNumber = 'CHUBB' + Math.floor(Math.random() * 1000000000).toString().padStart(9, '0');
+                
+                // Restart background music if not muted
+                if (!audioState.isMusicMuted) {
+                    audioState.backgroundMusic.currentTime = 0;
+                    audioState.backgroundMusic.play().catch(error => {
+                        console.log('Error playing background music:', error);
+                    });
+                }
+                
+                // Remove all existing enemies
+                for (const enemy of state.enemies) {
+                    scene.remove(enemy.mesh);
+                }
+                state.enemies = [];
+                
+                // Remove all power-ups
+                for (const powerUp of state.powerUps) {
+                    scene.remove(powerUp.mesh);
+                }
+                state.powerUps = [];
+                
+                // Reset camera position
+                camera.position.set(0, 3, 0);
+                camera.rotation.set(0, 0, 0);
+                
+                // Hide game over screen
+                gameOverScreen.style.display = 'none';
+                
+                // Show game controls again
+                document.getElementById('game-controls').style.display = 'flex';
+                
+                // Start new game
+                spawnEnemiesForWave();
+                updateUI();
+                
+                // Request pointer lock after a short delay
+                setTimeout(() => {
+                    renderer.domElement.requestPointerLock();
+                }, 100);
+            });
+            
+            exitButton.addEventListener('click', () => {
+                // Reset game state
+                state.health = state.maxHealth;
+                state.wave = 1;
+                state.gameOver = false;
+                state.gameStarted = false;  // Set to false to show start screen
+                
+                // Remove all existing enemies
+                for (const enemy of state.enemies) {
+                    scene.remove(enemy.mesh);
+                }
+                state.enemies = [];
+                
+                // Remove all power-ups
+                for (const powerUp of state.powerUps) {
+                    scene.remove(powerUp.mesh);
+                }
+                state.powerUps = [];
+                
+                // Reset camera position
+                camera.position.set(0, 3, 0);
+                camera.rotation.set(0, 0, 0);
+                
+                // Hide game over screen
+                gameOverScreen.style.display = 'none';
+                
+                // Show start screen
+                startScreen.style.display = 'flex';
+                
+                // Stop background music
+                audioState.backgroundMusic.pause();
+                
+                // Reset audio states
+                audioState.isMusicMuted = false;
+                audioState.isSoundMuted = false;
+                
+                // Update control buttons
+                gameControls.musicIcon.textContent = '🎵';
+                gameControls.musicText.textContent = 'Music On';
+                gameControls.musicMuteButton.classList.remove('muted');
+                gameControls.soundIcon.textContent = '🔊';
+                gameControls.soundText.textContent = 'Sound On';
+                gameControls.soundMuteButton.classList.remove('muted');
+                
+                // Update UI
+                updateUI();
+            });
+            
+            buttonContainer.appendChild(retryButton);
+            buttonContainer.appendChild(exitButton);
+            gameOverScreen.appendChild(buttonContainer);
+            gameOverScreen.style.pointerEvents = 'auto';
+        }
+        
+        // Add new function for wave completion popup
+        function showWaveCompletionPopup(waveNumber) {
+            document.exitPointerLock();
+            
+            const overlay = document.createElement('div');
+            overlay.className = 'overlay';
+            document.body.appendChild(overlay);
+            
+            const popup = document.createElement('div');
+            popup.className = 'wave-popup';
+            
+            const policyNumber = state.policyNumber;
+            let policyMessage = '';
+            let policyDigits = '';
+            
+            switch(waveNumber) {
+                case 1:
+                    policyDigits = policyNumber.slice(5, 8);
+                    policyMessage = `Remember these first 3 digits: ${policyDigits}`;
+                    break;
+                case 2:
+                    policyDigits = policyNumber.slice(8, 11);
+                    policyMessage = `Remember these next 3 digits: ${policyDigits}`;
+                    break;
+                case 3:
+                    policyMessage = `Complete Policy Number: ${policyNumber}`;
+                    break;
+            }
+            
+            const showPolicyNumber = waveNumber === 3;
+            
+            popup.innerHTML = `
+                <h2>Congratulations!</h2>
+                <p>You completed Wave ${waveNumber}!</p>
+                ${showPolicyNumber ? `<p>Policy Number: ${policyNumber}</p>` : ''}
+                <p class="policy-message">${policyMessage}</p>
+                ${waveNumber < 3 ? `
+                    <p class="wave-info">Complete all waves to see the full policy number!</p>
+                    <button class="continue-button">Continue to Wave ${waveNumber + 1}</button>
+                ` : `
+                    <p class="victory-info">You've completed all waves!</p>
+                    <button class="continue-button victory">Finish Game</button>
+                `}
+            `;
+            
+            document.body.appendChild(popup);
+            
+            const continueButton = popup.querySelector('.continue-button');
+            continueButton.addEventListener('click', () => {
+                document.body.removeChild(popup);
+                document.body.removeChild(overlay);
+                
+                if (waveNumber < state.maxWaves) {
+                    waveNumber++;
+                    startScreen.style.display = 'none';
+                    state.gameStarted = true;
+                    updateUI();
+                    spawnEnemiesForWave();
+                    setTimeout(() => {
+                        renderer.domElement.requestPointerLock();
+                    }, 2000);
+                } else {
+                    gameOver('Victory! You completed all waves!');
+                }
+            });
+            
+            state.gameStarted = false;
+        }
+        
+        // Initialize the game
+        function init() {
+            createOffice();
+            initControls();
+            
+            // Hide cursor when showing start screen
+            document.body.style.cursor = 'none';
+            
+            // Start screen button
+            startButton.addEventListener('click', () => {
+                startScreen.style.display = 'none';
+                state.gameStarted = true;
+                spawnEnemiesForWave();
+                
+                // Start background music
+                audioState.backgroundMusic.play().catch(error => {
+                    console.log('Error playing background music:', error);
+                });
+                
+                // Request pointer lock and ensure cursor is hidden
+                renderer.domElement.requestPointerLock();
+                document.body.style.cursor = 'none';
+            });
+            
+            // Restart button
+            restartButton.addEventListener('click', () => {
+                // Reset game state
+                state.health = state.maxHealth;
+                state.wave = 1;
+                state.gameOver = false;
+                
+                // Remove all existing enemies
+                for (const enemy of state.enemies) {
+                    scene.remove(enemy.mesh);
+                }
+                state.enemies = [];
+                
+                // Remove all power-ups
+                for (const powerUp of state.powerUps) {
+                    scene.remove(powerUp.mesh);
+                }
+                state.powerUps = [];
+                
+                // Reset camera position
+                camera.position.set(0, 3, 0);
+                camera.rotation.set(0, 0, 0);
+                
+                // Hide game over screen
+                gameOverScreen.style.display = 'none';
+                
+                // Start new game
+                state.gameStarted = true;
+                spawnEnemiesForWave();
+                updateUI();
+                
+                // Request pointer lock and ensure cursor is hidden
+                renderer.domElement.requestPointerLock();
+                document.body.style.cursor = 'none';
+            });
+            
+            // Handle window resize
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+            
+            // Start animation loop
+            animate();
+
+            // Initialize mute button states
+            if (audioState.isMusicMuted) {
+                gameControls.musicIcon.textContent = '🎵';
+                gameControls.musicText.textContent = 'Music Off';
+                gameControls.musicMuteButton.classList.add('muted');
+            }
+            if (audioState.isSoundMuted) {
+                gameControls.soundIcon.textContent = '🔇';
+                gameControls.soundText.textContent = 'Sound Off';
+                gameControls.soundMuteButton.classList.add('muted');
+            }
+        }
+        
+        // Main animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Skip updates if game not started or is over
+            if (!state.gameStarted || state.gameOver) {
+                renderer.render(scene, camera);
+                return;
+            }
+            
+            // Pulsate emergency light
+            const time = Date.now() * 0.001;
+            emergencyLight.intensity = 0.5 + Math.sin(time * 3) * 0.5;
+            
+            // Update player movement
+            const delta = 0.1;
+            
+            // Calculate velocity based on movement direction
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+            
+            // Fix movement direction calculation
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.normalize();
+            
+            // Apply movement in world space
+            if (moveForward || moveBackward) velocity.z -= direction.z * 40.0 * delta;
+            if (moveLeft || moveRight) velocity.x -= direction.x * 40.0 * delta;
+            
+            // Apply rotation to movement
+            const moveVector = new THREE.Vector3(velocity.x, 0, velocity.z);
+            moveVector.applyAxisAngle(new THREE.Vector3(0, 1, 0), camera.rotation.y);
+            
+            // Calculate potential new position
+            const newPosition = camera.position.clone().add(
+                new THREE.Vector3(moveVector.x * delta, 0, moveVector.z * delta)
+            );
+            
+            // Check for collisions
+            let collision = false;
+            const playerRadius = 1.0; // Collision radius for the player
+            
+            for (const object of collidableObjects) {
+                // Get object bounds
+                let box;
+                if (object.geometry) {
+                    const boundingBox = new THREE.Box3().setFromObject(object);
+                    const size = new THREE.Vector3();
+                    boundingBox.getSize(size);
+                    
+                    // Create a slightly larger box for collision
+                    box = {
+                        minX: object.position.x - size.x/2 - playerRadius,
+                        maxX: object.position.x + size.x/2 + playerRadius,
+                        minZ: object.position.z - size.z/2 - playerRadius,
+                        maxZ: object.position.z + size.z/2 + playerRadius
+                    };
+                    
+                    // Check if new position would collide
+                    if (newPosition.x > box.minX && 
+                        newPosition.x < box.maxX && 
+                        newPosition.z > box.minZ && 
+                        newPosition.z < box.maxZ) {
+                        collision = true;
+                        break;
+                    }
+                }
+            }
+            
+            // Apply movement if no collision
+            if (!collision) {
+                camera.position.add(new THREE.Vector3(moveVector.x * delta, 0, moveVector.z * delta));
+            }
+            
+            // Update enemies
+            for (let i = state.enemies.length - 1; i >= 0; i--) {
+                state.enemies[i].update(camera.position);
+            }
+            
+            // Update power-ups
+            for (let i = state.powerUps.length - 1; i >= 0; i--) {
+                const collected = state.powerUps[i].update(camera.position);
+                if (collected) {
+                    state.powerUps.splice(i, 1);
+                }
+            }
+            
+            // Render the scene
+            renderer.render(scene, camera);
+        }
+        
+        // Start the game
+        init();
+
+        // Update the exit game handler
+        function exitGame() {
+            if (confirm('Are you sure you want to exit the game? Your progress will be lost.')) {
+                // Reset game state
+                state.health = state.maxHealth;
+                state.wave = 1;
+                state.gameOver = false;
+                state.gameStarted = false;  // Set to false to show start screen
+                
+                // Remove all existing enemies
+                for (const enemy of state.enemies) {
+                    scene.remove(enemy.mesh);
+                }
+                state.enemies = [];
+                
+                // Remove all power-ups
+                for (const powerUp of state.powerUps) {
+                    scene.remove(powerUp.mesh);
+                }
+                state.powerUps = [];
+                
+                // Reset camera position
+                camera.position.set(0, 3, 0);
+                camera.rotation.set(0, 0, 0);
+                
+                // Hide game over screen if it's showing
+                gameOverScreen.style.display = 'none';
+                
+                // Show start screen
+                startScreen.style.display = 'flex';
+                document.body.style.cursor = 'none';
+                
+                // Stop background music
+                audioState.backgroundMusic.pause();
+                
+                // Reset audio states
+                audioState.isMusicMuted = false;
+                audioState.isSoundMuted = false;
+                
+                // Update control buttons
+                gameControls.musicIcon.textContent = '🎵';
+                gameControls.musicText.textContent = 'Music On';
+                gameControls.musicMuteButton.classList.remove('muted');
+                gameControls.soundIcon.textContent = '🔊';
+                gameControls.soundText.textContent = 'Sound On';
+                gameControls.soundMuteButton.classList.remove('muted');
+                
+                // Update UI
+                updateUI();
+            }
+        }
+
+        // Add event listeners for the control buttons
+        gameControls.musicMuteButton.addEventListener('click', toggleMusic);
+        gameControls.soundMuteButton.addEventListener('click', toggleSound);
+        gameControls.exitButton.addEventListener('click', exitGame);
+    </script>
+</body>
+</html>
